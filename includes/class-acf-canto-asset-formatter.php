@@ -293,16 +293,23 @@ class ACF_Canto_Asset_Formatter
      */
     private function extract_api_urls(&$formatted_data, $url_data)
     {
-        if (isset($url_data['preview'])) {
+        // Priority 1: Use directUrlPreview for preview URL (direct access, no auth needed)
+        if (isset($url_data['directUrlPreview'])) {
+            $formatted_data['url'] = $url_data['directUrlPreview'];
+            $formatted_data['thumbnail'] = $url_data['directUrlPreview'];
+        }
+        // Priority 2: Fall back to API preview if directUrlPreview is not available
+        elseif (isset($url_data['preview'])) {
             $formatted_data['url'] = $url_data['preview'];
         }
         
-        if (isset($url_data['download'])) {
-            $formatted_data['download_url'] = $url_data['download'];
+        // Priority 1: Use directUrlOriginal for download URL (the actual file)
+        if (isset($url_data['directUrlOriginal'])) {
+            $formatted_data['download_url'] = $url_data['directUrlOriginal'];
         }
-        
-        if (isset($url_data['directUrlPreview'])) {
-            $formatted_data['thumbnail'] = $url_data['directUrlPreview'];
+        // Priority 2: Fall back to download if directUrlOriginal is not available
+        elseif (isset($url_data['download'])) {
+            $formatted_data['download_url'] = $url_data['download'];
         }
     }
     
