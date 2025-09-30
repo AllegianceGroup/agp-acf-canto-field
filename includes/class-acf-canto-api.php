@@ -163,7 +163,10 @@ class ACF_Canto_API
             'limit' => self::DEFAULT_SEARCH_LIMIT,
             'start' => 0,
             'file_types' => $this->get_all_file_types(),
-            'operator' => 'and'
+            'operator' => 'and',
+            'sortBy' => 'time',
+            'sortDirection' => 'descending',
+            'searchInField' => 'filename'
         );
         
         $options = array_merge($defaults, $options);
@@ -183,7 +186,10 @@ class ACF_Canto_API
             'fileType' => $options['file_types'],
             'operator' => $options['operator'],
             'limit' => $options['limit'],
-            'start' => $options['start']
+            'start' => $options['start'],
+            'sortBy' => $options['sortBy'],
+            'sortDirection' => $options['sortDirection'],
+            'searchInField' => $options['searchInField']
         );
         
         $endpoint_with_params = add_query_arg($params, $endpoint);
