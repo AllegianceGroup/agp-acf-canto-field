@@ -9,6 +9,7 @@
         var $modal = $field.find('.acf-canto-modal');
         var $searchInput = $modal.find('.acf-canto-search-input');
         var $searchBtn = $modal.find('.acf-canto-search-btn');
+        var $searchClear = $modal.find('.acf-canto-search-clear');
         var $results = $modal.find('.acf-canto-assets-grid');
         var $loading = $modal.find('.acf-canto-loading');
         var $confirmBtn = $modal.find('.acf-canto-confirm-selection');
@@ -27,9 +28,11 @@
         var $currentPath = $modal.find('.acf-canto-current-path');
         var $treeRefresh = $modal.find('.acf-canto-tree-refresh');
         var $browseRefresh = $modal.find('.acf-canto-browse-refresh');
-        
+        var $viewToggleBtns = $modal.find('.acf-canto-view-toggle-btn');
+
         var selectedAsset = null;
         var currentAlbumId = null;
+        var currentViewMode = 'grid'; // Default view mode
         
         // Add error handling for existing preview images and initialize asset data
         $field.find('.acf-canto-preview-image img').on('error', function() {
@@ -91,12 +94,34 @@
                 performSearch();
             }
         });
+
+        // Show/hide clear button based on input content
+        $searchInput.on('input', function() {
+            if ($(this).val().length > 0) {
+                $searchClear.show();
+            } else {
+                $searchClear.hide();
+            }
+        });
+
+        // Clear search input
+        $searchClear.on('click', function(e) {
+            e.preventDefault();
+            clearSearch();
+        });
         
         // Tab navigation
         $navTabs.on('click', function(e) {
             e.preventDefault();
             var view = $(this).data('view');
             switchView(view);
+        });
+
+        // View mode toggle (grid/list)
+        $viewToggleBtns.on('click', function(e) {
+            e.preventDefault();
+            var viewMode = $(this).data('view-mode');
+            switchViewMode(viewMode);
         });
         
         // Tree navigation
@@ -212,6 +237,17 @@
         }
         
         /**
+         * Clear search input and reload all assets
+         */
+        function clearSearch() {
+            $searchInput.val('');
+            $searchClear.hide();
+            // Reload all assets (empty query shows all)
+            performSearch('');
+            $searchInput.focus();
+        }
+
+        /**
          * Perform search for assets
          */
         function performSearch(query, targetContainer, loadingElement) {
@@ -275,12 +311,16 @@
             }
             
             // Create grid container if it doesn't exist
-            var $grid = targetContainer.hasClass('acf-canto-assets-grid') ? 
-                        targetContainer : 
+            var $grid = targetContainer.hasClass('acf-canto-assets-grid') ?
+                        targetContainer :
                         targetContainer.find('.acf-canto-assets-grid');
-            
+
             if ($grid.length === 0) {
                 $grid = $('<div class="acf-canto-assets-grid">');
+                // Apply current view mode to new grid
+                if (currentViewMode === 'list') {
+                    $grid.addClass('list-view');
+                }
                 targetContainer.append($grid);
             } else {
                 $grid.empty();
@@ -545,9 +585,9 @@
         function switchView(view) {
             $navTabs.removeClass('active');
             $navTabs.filter('[data-view="' + view + '"]').addClass('active');
-            
+
             $('.acf-canto-view').removeClass('active');
-            
+
             if (view === 'search') {
                 $searchView.addClass('active');
             } else if (view === 'browse') {
@@ -561,6 +601,28 @@
                     performSearch('', $browseAssets, $browseLoading);
                 }
             }
+        }
+
+        /**
+         * Switch between grid and list view modes
+         */
+        function switchViewMode(viewMode) {
+            currentViewMode = viewMode;
+
+            // Update toggle button states
+            $viewToggleBtns.removeClass('active');
+            $viewToggleBtns.filter('[data-view-mode="' + viewMode + '"]').addClass('active');
+
+            // Apply view mode to both search and browse asset grids
+            var $allGrids = $modal.find('.acf-canto-assets-grid');
+
+            if (viewMode === 'list') {
+                $allGrids.addClass('list-view');
+            } else {
+                $allGrids.removeClass('list-view');
+            }
+
+            console.log('ACF Canto: Switched to ' + viewMode + ' view');
         }
         
         /**

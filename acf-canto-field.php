@@ -2,8 +2,8 @@
 /**
  * Plugin Name: ACF Canto Field
  * Description: A custom Advanced Custom Fields field type for integrating with Canto digital asset management. Supports direct document URLs and multiple asset formats with enhanced URL pattern recognition.
- * Version: 2.3.0
- * Author: Your Name
+ * Version: 2.4.0
+ * Author: AGP https://teamallegiance.com
  * License: GPL v2 or later
  * Text Domain: acf-canto-field
  * Requires at least: 5.0
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ACF_CANTO_FIELD_VERSION', '2.3.0');
+define('ACF_CANTO_FIELD_VERSION', '2.4.0');
 define('ACF_CANTO_FIELD_PLUGIN_FILE', __FILE__);
 define('ACF_CANTO_FIELD_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('ACF_CANTO_FIELD_PLUGIN_PATH', plugin_dir_path(__FILE__));

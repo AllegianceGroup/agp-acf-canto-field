@@ -1,6 +1,6 @@
 # ACF Canto Field
 
-A custom Advanced Custom Fields (ACF) field that integrates with the Canto plugin to allow users to select assets directly from their Canto library. **Version 2.3.0** features enhanced direct URL support and WP All Import Pro compatibility.
+A custom Advanced Custom Fields (ACF) field that integrates with the Canto plugin to allow users to select assets directly from their Canto library. **Version 2.4.0** features list/grid view toggle, search clear button, and enhanced fuzzy search fallback.
 
 ## Description
 
@@ -8,8 +8,11 @@ This plugin extends ACF by adding a new field type called "Canto Asset" that ena
 
 ## Key Features
 
+- ✅ **Grid & List Views**: Toggle between grid and list view modes for browsing assets
+- ✅ **Search Clear Button**: Quickly clear search queries with one click
+- ✅ **Enhanced Fuzzy Search**: Intelligent three-tier fallback matching (exact filename → exact name → fuzzy match)
 - ✅ **Direct URL Support**: Full support for Canto's direct document URLs (`/direct/document/ASSET_ID/TOKEN/original`)
-- ✅ **WP All Import Pro Compatible**: Import assets directly using URLs from CSV/XML files  
+- ✅ **WP All Import Pro Compatible**: Import assets directly using URLs from CSV/XML files
 - ✅ **Multiple URL Formats**: Supports both legacy API binary URLs and modern direct URLs
 - ✅ **Smart Asset Detection**: Automatically extracts asset IDs from various URL patterns
 - ✅ **Comprehensive Caching**: 1-hour transient caching for optimal performance
@@ -71,10 +74,10 @@ The plugin **prioritizes direct URLs** when available and falls back to API bina
 
 The field provides a modal interface with two main tabs:
 
-- **Search Tab**: Search your Canto library by keywords
+- **Search Tab**: Search your Canto library by keywords with a convenient clear button
 - **Browse Tab**: Navigate through albums and folders using a tree structure
 
-Both views show asset thumbnails, names, and basic metadata. Users can select an asset by clicking on it, then confirm their selection.
+Both views show asset thumbnails, names, and basic metadata. You can toggle between **grid view** (cards with larger thumbnails) and **list view** (compact rows) using the view toggle buttons. Users can select an asset by clicking on it, then confirm their selection.
 
 ## WP All Import Pro Integration
 
@@ -152,11 +155,16 @@ $asset_url = get_field('your_field_name'); // if return format is 'URL'
 
 #### Finding assets by filename (Legacy Support)
 
-For backward compatibility and migration scenarios, you can still search for assets by their filename:
+For backward compatibility and migration scenarios, you can still search for assets by their filename. The function now uses an intelligent **three-tier fallback strategy**:
+
+1. **Priority 1**: Exact filename match
+2. **Priority 2**: Exact name field match
+3. **Priority 3**: First fuzzy search result (NEW in v2.4.0)
 
 ```php
-// Find an asset by filename (for migration or legacy compatibility)
+// Find an asset by filename with intelligent fuzzy fallback
 $asset = acf_canto_find_asset_by_filename('company-logo.png');
+// Will match: "company-logo.png" (exact), "company-logo-2024.png" (fuzzy), etc.
 
 if ($asset) {
     echo '<img src="' . $asset['thumbnail'] . '" alt="' . $asset['name'] . '">';
@@ -314,7 +322,9 @@ if ($asset_id) {
 ## Features
 
 ### User Interface & Experience
-- **Search Integration**: Search your Canto library directly from the field interface
+- **Grid & List View Toggle**: Switch between grid view (larger thumbnails) and list view (compact rows) for browsing
+- **Search Clear Button**: One-click button to clear search queries and reset results
+- **Search Integration**: Search your Canto library directly from the field interface with fuzzy keyword matching
 - **Browse Navigation**: Navigate through Canto albums and folders using tree structure
 - **Asset Preview**: View thumbnails and metadata before selecting
 - **Multiple Asset Types**: Supports images, videos, and documents with appropriate handling
@@ -325,6 +335,7 @@ if ($asset_id) {
 - **Asset ID Extraction**: Automatically extracts asset IDs from download URLs for efficient lookups
 - **Flexible Return Formats**: Choose between full object, ID only, or URL only
 - **Migration Support**: Seamlessly handles migration from filename-based to URL-based identifiers
+- **Intelligent Fuzzy Search**: Three-tier fallback matching (exact filename → exact name → fuzzy match) for maximum flexibility
 - **Filename-Based Retrieval**: Find and retrieve assets using their original filename (maintained for backward compatibility)
 
 ### Performance & Reliability

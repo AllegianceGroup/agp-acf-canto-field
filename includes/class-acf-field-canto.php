@@ -302,13 +302,24 @@ class ACF_Field_Canto extends acf_field
                             <button type="button" class="acf-canto-nav-tab active" data-view="search"><?php _e('Search', 'acf-canto-field'); ?></button>
                             <button type="button" class="acf-canto-nav-tab" data-view="browse"><?php _e('Browse', 'acf-canto-field'); ?></button>
                         </div>
+                        <div class="acf-canto-view-toggle">
+                            <button type="button" class="acf-canto-view-toggle-btn active" data-view-mode="grid" title="<?php _e('Grid View', 'acf-canto-field'); ?>">
+                                <span class="dashicons dashicons-grid-view"></span>
+                            </button>
+                            <button type="button" class="acf-canto-view-toggle-btn" data-view-mode="list" title="<?php _e('List View', 'acf-canto-field'); ?>">
+                                <span class="dashicons dashicons-list-view"></span>
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="acf-canto-content">
                         <!-- Search View -->
                         <div class="acf-canto-view acf-canto-search-view active">
                             <div class="acf-canto-search">
-                                <input type="text" class="acf-canto-search-input" placeholder="<?php echo esc_attr($this->l10n['search_placeholder']); ?>" />
+                                <div class="acf-canto-search-input-wrapper">
+                                    <input type="text" class="acf-canto-search-input" placeholder="<?php echo esc_attr($this->l10n['search_placeholder']); ?>" />
+                                    <button type="button" class="acf-canto-search-clear" title="<?php _e('Clear search', 'acf-canto-field'); ?>" style="display: none;">&times;</button>
+                                </div>
                                 <button type="button" class="button acf-canto-search-btn"><?php _e('Search', 'acf-canto-field'); ?></button>
                             </div>
                             <div class="acf-canto-results">
@@ -651,27 +662,49 @@ class ACF_Field_Canto extends acf_field
             return false;
         }
         
-        // Look for exact filename match
+        // Priority 1: Look for exact filename match
         foreach ($data['results'] as $item) {
             $asset_data = $this->format_asset_data_from_search($item);
             if ($asset_data && $asset_data['filename'] === $filename) {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('ACF Canto Field: Found exact filename match for: ' . $filename);
+                }
                 // Cache for 1 hour
                 set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
                 return $asset_data;
             }
         }
-        
-        // If no filename match found, try matching against the name field
+
+        // Priority 2: Try matching against the name field
         // This handles cases where assets don't have explicit filename metadata
         foreach ($data['results'] as $item) {
             $asset_data = $this->format_asset_data_from_search($item);
             if ($asset_data && $asset_data['name'] === $filename) {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('ACF Canto Field: Found exact name match for: ' . $filename);
+                }
                 // Cache for 1 hour
                 set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
                 return $asset_data;
             }
         }
-        
+
+        // Priority 3: Fall back to first fuzzy match result if available
+        // This handles cases with filename variations or partial matches
+        if (!empty($data['results'])) {
+            $first_result = reset($data['results']);
+            $asset_data = $this->format_asset_data_from_search($first_result);
+
+            if ($asset_data) {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('ACF Canto Field: Using fuzzy match fallback for: ' . $filename . ' (matched: ' . $asset_data['filename'] . ')');
+                }
+                // Cache for 1 hour
+                set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
+                return $asset_data;
+            }
+        }
+
         return false;
     }
     
@@ -942,7 +975,7 @@ class ACF_Field_Canto extends acf_field
      */
     private function find_best_filename_match($results, $filename)
     {
-        // First pass: exact filename match
+        // Priority 1: Exact filename match
         foreach ($results as $item) {
             $asset_data = $this->formatter->format_from_search($item);
             if ($asset_data && $asset_data['filename'] === $filename) {
@@ -950,8 +983,8 @@ class ACF_Field_Canto extends acf_field
                 return $asset_data;
             }
         }
-        
-        // Second pass: name field match (handles assets without explicit filename metadata)
+
+        // Priority 2: Name field match (handles assets without explicit filename metadata)
         foreach ($results as $item) {
             $asset_data = $this->formatter->format_from_search($item);
             if ($asset_data && $asset_data['name'] === $filename) {
@@ -959,7 +992,22 @@ class ACF_Field_Canto extends acf_field
                 return $asset_data;
             }
         }
-        
+
+        // Priority 3: Fall back to first fuzzy match result if available
+        if (!empty($results)) {
+            $first_result = reset($results);
+            $asset_data = $this->formatter->format_from_search($first_result);
+
+            if ($asset_data) {
+                $this->logger->info('Using fuzzy match fallback', array(
+                    'searched_filename' => $filename,
+                    'matched_filename' => $asset_data['filename'],
+                    'asset_id' => $asset_data['id']
+                ));
+                return $asset_data;
+            }
+        }
+
         $this->logger->info('No filename match found in search results', array('filename' => $filename, 'results_count' => count($results)));
         return false;
     }

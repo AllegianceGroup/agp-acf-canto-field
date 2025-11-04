@@ -158,12 +158,43 @@
     align-items: center;
 }
 
-.acf-canto-search-input {
+.acf-canto-search-input-wrapper {
     flex: 1;
-    padding: 8px 12px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.acf-canto-search-input {
+    width: 100%;
+    padding: 8px 32px 8px 12px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 14px;
+}
+
+.acf-canto-search-clear {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.acf-canto-search-clear:hover {
+    background: #f0f0f0;
+    color: #333;
 }
 
 .acf-canto-search-btn {
@@ -191,6 +222,41 @@
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 15px;
     padding: 10px 0;
+}
+
+/* List view mode */
+.acf-canto-assets-grid.list-view {
+    display: block;
+}
+
+.acf-canto-assets-grid.list-view .acf-canto-asset-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+
+.acf-canto-assets-grid.list-view .acf-canto-asset-thumb {
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+    margin-bottom: 0;
+}
+
+.acf-canto-assets-grid.list-view .acf-canto-asset-details {
+    flex-grow: 1;
+}
+
+.acf-canto-assets-grid.list-view .acf-canto-asset-details h4 {
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.acf-canto-assets-grid.list-view .acf-canto-asset-details p {
+    font-size: 12px;
+    display: inline-block;
+    margin-right: 15px;
 }
 
 .acf-canto-asset-item {
@@ -302,11 +368,52 @@ body.acf-canto-modal-open {
 .acf-canto-navigation {
     border-bottom: 1px solid #ddd;
     margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .acf-canto-nav-tabs {
     display: flex;
     gap: 0;
+}
+
+.acf-canto-view-toggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.acf-canto-view-toggle-btn {
+    background: white;
+    border: none;
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+}
+
+.acf-canto-view-toggle-btn:not(:last-child) {
+    border-right: 1px solid #ddd;
+}
+
+.acf-canto-view-toggle-btn:hover {
+    background: #f5f5f5;
+}
+
+.acf-canto-view-toggle-btn.active {
+    background: #0073aa;
+    color: white;
+}
+
+.acf-canto-view-toggle-btn .dashicons {
+    width: 20px;
+    height: 20px;
+    font-size: 20px;
 }
 
 .acf-canto-nav-tab {

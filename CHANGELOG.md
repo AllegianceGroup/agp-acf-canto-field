@@ -5,6 +5,34 @@ All notable changes to the ACF Canto Field plugin will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2025-11-04
+
+### Added
+- **Grid & List View Toggle**: Users can now switch between grid view (larger thumbnails in cards) and list view (compact horizontal rows) for browsing assets
+- **Search Clear Button**: One-click button to clear search queries and reset results, automatically shows/hides based on input
+- **Fuzzy Search Fallback**: Enhanced `find_asset_by_filename()` with intelligent three-tier fallback matching:
+  1. Priority 1: Exact filename match
+  2. Priority 2: Exact name field match
+  3. Priority 3: First fuzzy search result (NEW)
+- **Enhanced User Feedback**: Added detailed debug logging for all fallback levels when `WP_DEBUG` is enabled
+
+### Changed
+- **Asset Matching Strategy**: `find_asset_by_filename()` now returns first fuzzy match when no exact match found, making it more forgiving for filename variations
+- **UI Navigation**: View mode persists across searches and tab switches for consistent user experience
+- **Search Interface**: Search input now includes inline clear button with proper focus management
+
+### Enhanced
+- **User Experience**: View toggle with WordPress dashicons (grid-view/list-view) for familiar interface
+- **CSS Responsive Design**: List view adapts to screen size with optimized layouts for mobile devices
+- **Developer Experience**: Consistent three-tier fallback logic in both `find_asset_by_filename()` and `find_best_filename_match()` methods
+- **Asset Discovery**: More flexible asset retrieval that handles filename variations, typos, and partial matches
+
+### Technical Details
+- **View State Management**: JavaScript maintains `currentViewMode` variable to track grid/list preference
+- **CSS Classes**: `.list-view` modifier class for grid-to-list transformation
+- **Fallback Logging**: Detailed logs show which priority level matched (exact filename, exact name, or fuzzy)
+- **Search Clear UX**: Button positioned inside input field with absolute positioning and hover effects
+
 ## [2.3.0] - 2025-09-25
 
 ### Added
