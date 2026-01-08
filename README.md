@@ -1,4 +1,4 @@
-# ACF Canto Field
+# AGP ACF Canto Field
 
 A custom Advanced Custom Fields (ACF) field that integrates with the Canto plugin to allow users to select assets directly from their Canto library. **Version 2.4.0** features list/grid view toggle, search clear button, and enhanced fuzzy search fallback.
 
@@ -29,7 +29,7 @@ This plugin extends ACF by adding a new field type called "Canto Asset" that ena
 
 ## Installation
 
-1. Upload the `acf-canto-field` folder to your `/wp-content/plugins/` directory
+1. Upload the `agp-acf-canto-field` folder to your `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
 3. Make sure you have ACF and the Canto plugin installed and configured
 4. Verify your Canto plugin settings include:
