@@ -96,7 +96,7 @@ class ACF_Canto_AJAX_Handler
         $assets = array();
         if (isset($result['results']) && is_array($result['results'])) {
             foreach ($result['results'] as $item) {
-                $asset_data = $this->format_asset_data($item);
+                $asset_data = $this->formatter->format_from_search($item);
                 if ($asset_data) {
                     $assets[] = $asset_data;
                 }
@@ -104,257 +104,6 @@ class ACF_Canto_AJAX_Handler
         }
         
         wp_send_json_success($assets);
-    }
-    
-    /**
-     * Format asset data for frontend (compatible with original format)
-     *
-     * @param array $data Raw asset data from API
-     * @return array|false Formatted asset data
-     */
-    private function format_asset_data($data)
-    {
-        if (!is_array($data) || !isset($data['id'])) {
-            return false;
-        }
-        
-        // Determine asset type
-        $scheme = 'image'; // default
-        if (isset($data['scheme'])) {
-            $scheme = $data['scheme'];
-        } elseif (isset($data['url']['preview'])) {
-            if (strpos($data['url']['preview'], '/video/') !== false) {
-                $scheme = 'video';
-            } elseif (strpos($data['url']['preview'], '/document/') !== false) {
-                $scheme = 'document';
-            }
-        }
-        
-        $asset = array(
-            'id' => $data['id'],
-            'scheme' => $scheme,
-            'name' => isset($data['name']) ? $data['name'] : 'Untitled',
-            'filename' => '',
-            'url' => '',
-            'thumbnail' => '',
-            'download_url' => '',
-            'dimensions' => '',
-            'mime_type' => '',
-            'size' => '',
-            'uploaded' => isset($data['lastUploaded']) ? $data['lastUploaded'] : '',
-            'metadata' => isset($data['default']) ? $data['default'] : array(),
-        );
-        
-        // Get Canto configuration for proper URL construction
-        $domain = get_option('fbc_flight_domain');
-        $app_api = get_option('fbc_app_api') ?: 'canto.com';
-        
-        // URLs from API response (if available)
-        if (isset($data['url'])) {
-            if (isset($data['url']['preview'])) {
-                $asset['url'] = $data['url']['preview'];
-            }
-            if (isset($data['url']['download'])) {
-                $asset['download_url'] = $data['url']['download'];
-            }
-            // Check for directUrlPreview which doesn't need authentication
-            if (isset($data['url']['directUrlPreview'])) {
-                $asset['thumbnail'] = $data['url']['directUrlPreview'];
-            }
-        }
-        
-        // Fallback: Build proper thumbnail URL using our proxy endpoint if no direct URL
-        if (empty($asset['thumbnail']) && $domain) {
-            $asset['thumbnail'] = home_url('canto-thumbnail/' . $scheme . '/' . $data['id']);
-        }
-        
-        // Final fallback: Use default thumbnail based on asset type
-        if (empty($asset['thumbnail'])) {
-            $plugin_url = plugin_dir_url(dirname(__FILE__));
-            switch ($scheme) {
-                case 'video':
-                    $asset['thumbnail'] = $plugin_url . 'assets/images/default-video.svg';
-                    break;
-                case 'document':
-                    $asset['thumbnail'] = $plugin_url . 'assets/images/default-document.svg';
-                    break;
-                case 'image':
-                default:
-                    $asset['thumbnail'] = $plugin_url . 'assets/images/default-image.svg';
-                    break;
-            }
-        }
-        
-        // If no download URL from API, construct one using binary API
-        if (empty($asset['download_url']) && $domain) {
-            if ($scheme === 'image') {
-                $asset['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/advance/image/' . $data['id'] . '/download/directuri?type=jpg&dpi=72';
-            } elseif ($scheme === 'video') {
-                $asset['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/video/' . $data['id'] . '/download';
-            } elseif ($scheme === 'document') {
-                $asset['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/document/' . $data['id'] . '/download';
-            }
-        }
-        
-        // Enhanced metadata collection
-        if (isset($data['default']) && is_array($data['default'])) {
-            $asset['metadata'] = $data['default'];
-            
-            // Extract and format common metadata fields
-            $metadata_mapping = array(
-                'Dimensions' => 'dimensions',
-                'Content Type' => 'mime_type', 
-                'File Size' => 'file_size',
-                'Created' => 'created_date',
-                'Modified' => 'modified_date',
-                'Creator' => 'creator',
-                'Copyright' => 'copyright',
-                'Keywords' => 'keywords',
-                'Description' => 'description',
-                'Title' => 'title',
-                'Color Space' => 'color_space',
-                'Bit Depth' => 'bit_depth',
-                'Resolution' => 'resolution',
-                'Camera Make' => 'camera_make',
-                'Camera Model' => 'camera_model',
-                'ISO' => 'iso',
-                'Aperture' => 'aperture',
-                'Shutter Speed' => 'shutter_speed',
-                'Focal Length' => 'focal_length',
-                'GPS Latitude' => 'gps_latitude',
-                'GPS Longitude' => 'gps_longitude',
-                'Duration' => 'duration',
-                'Frame Rate' => 'frame_rate',
-                'Video Codec' => 'video_codec',
-                'Audio Codec' => 'audio_codec',
-                'Page Count' => 'page_count',
-                'Author' => 'author',
-                'Subject' => 'subject'
-            );
-            
-            foreach ($metadata_mapping as $canto_field => $asset_field) {
-                if (isset($data['default'][$canto_field]) && !empty($data['default'][$canto_field])) {
-                    $asset[$asset_field] = $data['default'][$canto_field];
-                }
-            }
-            
-            // Handle dimensions specially if not already set
-            if (empty($asset['dimensions'])) {
-                $dimension_fields = array('Dimensions', 'Size', 'Image Size', 'Resolution');
-                foreach ($dimension_fields as $field) {
-                    if (isset($data['default'][$field]) && !empty($data['default'][$field])) {
-                        $asset['dimensions'] = $data['default'][$field];
-                        break;
-                    }
-                }
-            }
-            
-            // Extract filename from various possible metadata fields
-            $filename_fields = array('Filename', 'File Name', 'Original Filename', 'filename', 'file_name');
-            foreach ($filename_fields as $field) {
-                if (isset($data['default'][$field]) && !empty($data['default'][$field])) {
-                    $asset['filename'] = $data['default'][$field];
-                    break;
-                }
-            }
-            
-            // Format metadata for display
-            $asset['metadata_display'] = $this->format_metadata_for_display($data['default'], $scheme);
-        }
-        
-        // If no filename found in metadata, try to extract from name or construct from ID
-        if (empty($asset['filename'])) {
-            // If name contains file extension, use it as filename
-            if (preg_match('/\.[a-zA-Z0-9]{2,5}$/', $asset['name'])) {
-                $asset['filename'] = $asset['name'];
-            } else {
-                // Construct filename using asset name and scheme-based extension
-                $extension_map = array(
-                    'image' => 'jpg',
-                    'video' => 'mp4', 
-                    'document' => 'pdf'
-                );
-                $extension = isset($extension_map[$scheme]) ? $extension_map[$scheme] : 'bin';
-                $safe_name = preg_replace('/[^a-zA-Z0-9_-]/', '_', $asset['name']);
-                $asset['filename'] = $safe_name . '.' . $extension;
-            }
-        }
-        
-        // File size
-        if (isset($data['size'])) {
-            $asset['size'] = size_format($data['size']);
-        }
-        
-        // Add formatted date (try multiple date fields)
-        $asset['formatted_date'] = $this->get_formatted_asset_date($data, $asset['uploaded']);
-        
-        return $asset;
-    }
-    
-    /**
-     * Format metadata for display - simplified to only show required fields
-     *
-     * @param array $metadata Raw metadata from Canto
-     * @param string $scheme Asset type (image, video, document)
-     * @return array Organized metadata for display
-     */
-    private function format_metadata_for_display($metadata, $scheme)
-    {
-        // This method is no longer used for modal display
-        // Metadata is now shown directly under asset titles
-        return array('metadata' => array());
-    }
-    
-    /**
-     * Get formatted asset date from various possible sources
-     *
-     * @param array $data Raw asset data
-     * @param string $uploaded_date Fallback uploaded date
-     * @return string Formatted date or empty string
-     */
-    private function get_formatted_asset_date($data, $uploaded_date = '')
-    {
-        // Try to find date from metadata first
-        if (isset($data['default']) && is_array($data['default'])) {
-            $date_fields = array('Modified', 'Last Modified', 'Date Modified', 'Created', 'Date Created', 'lastModified', 'lastUploaded');
-            
-            foreach ($date_fields as $field) {
-                if (isset($data['default'][$field]) && !empty($data['default'][$field])) {
-                    return $this->format_date_to_us($data['default'][$field]);
-                }
-            }
-        }
-        
-        // Try lastUploaded from main data
-        if (isset($data['lastUploaded']) && !empty($data['lastUploaded'])) {
-            return $this->format_date_to_us($data['lastUploaded']);
-        }
-        
-        // Fallback to uploaded date parameter
-        if (!empty($uploaded_date)) {
-            return $this->format_date_to_us($uploaded_date);
-        }
-        
-        return '';
-    }
-    
-    /**
-     * Format date to US format (mm/dd/yyyy)
-     *
-     * @param string $date_string Raw date string from Canto
-     * @return string Formatted date or original string if parsing fails
-     */
-    private function format_date_to_us($date_string)
-    {
-        // Try to parse the date string
-        $timestamp = strtotime($date_string);
-        
-        if ($timestamp !== false) {
-            return date('m/d/Y', $timestamp);
-        }
-        
-        // If parsing fails, return original string
-        return $date_string;
     }
     
     /**
@@ -420,15 +169,13 @@ class ACF_Canto_AJAX_Handler
             return;
         }
         
-        $formatted_asset = $this->format_asset_data($result);
-        
+        $formatted_asset = $this->formatter->format_from_api($result, $asset_id);
+
         if (!$formatted_asset) {
             wp_send_json_error('Failed to format asset data');
             return;
         }
-        
-        // Asset data formatted successfully
-        
+
         wp_send_json_success($formatted_asset);
     }
     
@@ -617,7 +364,7 @@ class ACF_Canto_AJAX_Handler
                     // Process results
                     if (isset($data['results']) && is_array($data['results'])) {
                         foreach ($data['results'] as $item) {
-                            $asset = $this->format_asset_data($item);
+                            $asset = $this->formatter->format_from_search($item);
                             if ($asset) {
                                 $assets[] = $asset;
                             }

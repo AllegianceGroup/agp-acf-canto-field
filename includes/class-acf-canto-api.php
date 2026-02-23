@@ -386,6 +386,10 @@ class ACF_Canto_API
      */
     public function build_thumbnail_url($asset_id, $scheme)
     {
-        return home_url('canto-thumbnail/' . $scheme . '/' . $asset_id);
+        return add_query_arg(array(
+            'canto_thumbnail' => '1',
+            'asset_type'      => $scheme,
+            'asset_id'        => $asset_id,
+        ), home_url('/'));
     }
 }

@@ -22,100 +22,6 @@ define('ACF_CANTO_FIELD_PLUGIN_FILE', __FILE__);
 define('ACF_CANTO_FIELD_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('ACF_CANTO_FIELD_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
-/**
- * Helper function to extract asset ID from various URL formats
- *
- * @param string $url The URL to extract asset ID from
- * @return string|false Asset ID if found, false otherwise
- */
-function acf_canto_extract_asset_id($url) {
-    if (empty($url) || !filter_var($url, FILTER_VALIDATE_URL)) {
-        return false;
-    }
-    
-    // Pattern 1: Direct document URL - /direct/document/ASSET_ID/TOKEN/original
-    if (preg_match('/\/direct\/document\/([^\/\?]+)\/[^\/]+\/original/', $url, $matches)) {
-        return $matches[1];
-    }
-    
-    // Pattern 2: Direct document URL without /original - /direct/document/ASSET_ID
-    if (preg_match('/\/direct\/document\/([^\/\?]+)/', $url, $matches)) {
-        return $matches[1];
-    }
-    
-    // Pattern 3: API binary URL - /api_binary/v1/document/ASSET_ID
-    if (preg_match('/\/api_binary\/v1\/document\/([^\/\?]+)/', $url, $matches)) {
-        return $matches[1];
-    }
-    
-    // Pattern 4: Any other document URL with recognizable ID pattern
-    if (preg_match('/\/document\/([a-zA-Z0-9_-]{15,})/', $url, $matches)) {
-        return $matches[1];
-    }
-    
-    return false;
-}
-
-/**
- * Helper function to get asset data with URL fallback
- *
- * @param string $identifier Can be asset ID, download URL, or filename
- * @return array|false Asset data if found, false otherwise
- */
-function acf_canto_get_asset($identifier) {
-    if (empty($identifier)) {
-        return false;
-    }
-    
-    if (!class_exists('ACF_Field_Canto')) {
-        return false;
-    }
-    
-    $field = new ACF_Field_Canto();
-    
-    // If it looks like a URL, try URL-based lookup
-    if (filter_var($identifier, FILTER_VALIDATE_URL)) {
-        $asset_data = $field->find_asset_by_download_url($identifier);
-        if ($asset_data) {
-            return $asset_data;
-        }
-    }
-    
-    // If it looks like an asset ID (alphanumeric, longer than 10 chars), try direct lookup
-    if (preg_match('/^[a-zA-Z0-9_-]+$/', $identifier) && strlen($identifier) > 10) {
-        $asset_data = $field->get_canto_asset_data($identifier);
-        if ($asset_data) {
-            return $asset_data;
-        }
-    }
-    
-    // If it contains a dot, assume it's a filename and try filename search
-    if (strpos($identifier, '.') !== false) {
-        return $field->find_asset_by_filename($identifier);
-    }
-    
-    return false;
-}
-
-/**
- * Helper function to find Canto asset by filename
- *
- * @param string $filename The filename to search for
- * @return array|false Asset data if found, false otherwise
- */
-function acf_canto_find_asset_by_filename($filename) {
-    if (!class_exists('ACF_Field_Canto')) {
-        return false;
-    }
-    
-    // Create temporary instance to use the search method
-    $field = new ACF_Field_Canto();
-    return $field->find_asset_by_filename($filename);
-}
-
-
-
-
 define('ACF_CANTO_FIELD_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
@@ -155,13 +61,17 @@ class ACF_Canto_Field_Plugin
             'path'    => ACF_CANTO_FIELD_PLUGIN_PATH
         );
 
+        // Load the thumbnail proxy early so its init hook (priority 1)
+        // fires before SAML/SSO plugins can intercept the request.
+        require_once ACF_CANTO_FIELD_PLUGIN_PATH . 'includes/class-acf-canto-thumbnail-proxy.php';
+
         // Initialize plugin when ACF is ready
         add_action('init', array($this, 'init'), 20);
-        
+
         // Plugin activation/deactivation hooks
         register_activation_hook(__FILE__, array($this, 'activate'));
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
-        
+
         // Add admin notices
         add_action('admin_notices', array($this, 'admin_notices'));
     }
@@ -217,15 +127,12 @@ class ACF_Canto_Field_Plugin
     }
 
     /**
-     * Include AJAX handler and thumbnail proxy
+     * Include AJAX handler
      */
     public function include_ajax_handler()
     {
         require_once ACF_CANTO_FIELD_PLUGIN_PATH . 'includes/class-acf-canto-ajax.php';
         new ACF_Canto_AJAX_Handler();
-        
-        require_once ACF_CANTO_FIELD_PLUGIN_PATH . 'includes/class-acf-canto-thumbnail-proxy.php';
-        new ACF_Canto_Thumbnail_Proxy();
     }
 
     /**
@@ -233,16 +140,7 @@ class ACF_Canto_Field_Plugin
      */
     public function activate()
     {
-        // Set activation flag
         add_option('acf_canto_field_activated', true);
-        
-        // Flush rewrite rules to activate our thumbnail proxy
-        flush_rewrite_rules();
-        
-        // Clear any caches
-        if (function_exists('wp_cache_flush')) {
-            wp_cache_flush();
-        }
     }
 
     /**
@@ -250,27 +148,14 @@ class ACF_Canto_Field_Plugin
      */
     public function deactivate()
     {
-        // Clean up transients using improved cache clearing
-        if (class_exists('ACF_Canto_API')) {
-            $logger = new ACF_Canto_Logger();
-            $api = new ACF_Canto_API($logger);
-            $api->clear_cache();
-        } else {
-            // Fallback method
-            global $wpdb;
-            $wpdb->query(
-                "DELETE FROM {$wpdb->options} 
-                 WHERE option_name LIKE '_transient_canto_asset_%' 
-                 OR option_name LIKE '_transient_timeout_canto_asset_%'
-                 OR option_name LIKE '_transient_acf_canto_%' 
-                 OR option_name LIKE '_transient_timeout_acf_canto_%'"
-            );
-        }
-        
-        // Flush rewrite rules to remove our thumbnail proxy
-        flush_rewrite_rules();
-        
-        // Remove activation flag
+        // Clean up transients
+        global $wpdb;
+        $wpdb->query(
+            "DELETE FROM {$wpdb->options}
+             WHERE option_name LIKE '_transient_acf_canto_%'
+             OR option_name LIKE '_transient_timeout_acf_canto_%'"
+        );
+
         delete_option('acf_canto_field_activated');
     }
 
@@ -306,18 +191,6 @@ class ACF_Canto_Field_Plugin
         echo '<div class="notice notice-info is-dismissible">';
         echo '<p><strong>' . esc_html__('AGP ACF Canto Field', 'agp-acf-canto-field') . '</strong> ' . esc_html__('The Canto plugin is not installed or configured. The field will be available but will show a configuration message until Canto is properly set up.', 'agp-acf-canto-field') . '</p>';
         echo '</div>';
-    }
-
-    /**
-     * Add a note about Canto deprecation warnings if they appear
-     */
-    public function canto_deprecation_info()
-    {
-        if (function_exists('Canto') && defined('WP_DEBUG') && WP_DEBUG) {
-            echo '<div class="notice notice-info is-dismissible">';
-            echo '<p><strong>' . esc_html__('Note:', 'agp-acf-canto-field') . '</strong> ' . esc_html__('You may see deprecation warnings from the Canto plugin in your debug log. These are harmless and come from the official Canto plugin, not the AGP ACF Canto Field plugin. They will be fixed in a future Canto plugin update.', 'agp-acf-canto-field') . '</p>';
-            echo '</div>';
-        }
     }
 }
 

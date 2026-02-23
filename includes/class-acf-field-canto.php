@@ -408,6 +408,13 @@ class ACF_Field_Canto extends acf_field
     /**
      * Format the field value for frontend display
      *
+     * By default, constructs asset data from the stored URL without calling
+     * the Canto API. Thumbnails are served lazily by the canto-thumbnail
+     * proxy route when the browser requests them.
+     *
+     * To re-enable live API calls, use the filter:
+     *   add_filter('acf_canto_format_value_use_api', '__return_true');
+     *
      * @param mixed $value The value found in the database
      * @param int $post_id The post ID from which the value was loaded
      * @param array $field The field array holding all the field options
@@ -418,39 +425,124 @@ class ACF_Field_Canto extends acf_field
         if (empty($value)) {
             return false;
         }
-        
-        $asset_data = $this->get_asset_data_for_field($value);
-        
+
+        $use_api = apply_filters('acf_canto_format_value_use_api', false, $value, $post_id, $field);
+
+        if ($use_api) {
+            $asset_data = $this->get_asset_data_for_field($value);
+        } else {
+            $asset_data = $this->format_value_from_url($value);
+        }
+
         if (!$asset_data) {
             $this->logger->warning('Asset data not found for field value', array('value' => $value, 'post_id' => $post_id));
             return false;
         }
-        
+
         return $this->formatter->prepare_return_value($asset_data, $field);
     }
-    
-    
+
     /**
-     * Parse stored value - Legacy support for migration from old formats
-     * This can be removed after migration is complete
+     * Construct asset data from a download URL without calling the Canto API.
      *
-     * @param mixed $value The stored value
-     * @return string The filename
+     * Extracts the asset ID and scheme from the URL, then builds the same
+     * data structure that format_from_api() would return. Thumbnail URLs
+     * point to the local canto-thumbnail proxy route.
+     *
+     * @param mixed $value The stored field value (download URL or test format)
+     * @return array|false Asset data array, or false on failure
      */
-    private function parse_legacy_value($value)
+    private function format_value_from_url($value)
     {
-        // Handle old JSON format for migration purposes
-        if (is_string($value) && (strpos($value, '{') === 0)) {
-            $decoded = json_decode($value, true);
-            if (is_array($decoded) && isset($decoded['filename'])) {
-                return $decoded['filename'];
+        $download_url = (string) $value;
+
+        // Handle test format (CANTO_id_suffix) — fall back to API for these
+        if (strpos($download_url, 'CANTO_') === 0) {
+            return $this->get_asset_data_for_field($value);
+        }
+
+        // api_binary URLs require authentication and can't be used as direct
+        // browser downloads. Fall back to the API to get a directUrlOriginal.
+        if (strpos($download_url, '/api_binary/') !== false) {
+            return $this->get_asset_data_for_field($value);
+        }
+
+        $asset_id = $this->extract_asset_id_from_url($download_url);
+        if (!$asset_id) {
+            return false;
+        }
+
+        $scheme = $this->extract_scheme_from_url($download_url);
+        $name = $this->extract_name_from_url($download_url);
+
+        // Build the same structure as format_from_api() / build_base_asset_data()
+        return array(
+            'id'           => $asset_id,
+            'scheme'       => $scheme,
+            'name'         => $name ?: __('Untitled', 'acf-canto-field'),
+            'filename'     => $name ?: '',
+            'url'          => $download_url,
+            'thumbnail'    => $this->api->build_thumbnail_url($asset_id, $scheme),
+            'download_url' => $download_url,
+            'dimensions'   => '',
+            'mime_type'    => '',
+            'size'         => '',
+            'uploaded'     => '',
+            'metadata'     => array(),
+        );
+    }
+
+    /**
+     * Extract the asset scheme (image, video, document) from a URL.
+     *
+     * @param string $url
+     * @return string One of 'image', 'video', 'document'
+     */
+    private function extract_scheme_from_url($url)
+    {
+        if (preg_match('/\/(image)\//', $url)) {
+            return 'image';
+        }
+        if (preg_match('/\/(video)\//', $url)) {
+            return 'video';
+        }
+        // Default to document (most assets are PDFs)
+        return 'document';
+    }
+
+    /**
+     * Extract the asset name from a Canto download URL.
+     *
+     * Checks the 'name' query parameter first (present in direct URLs),
+     * then falls back to the URL path basename. Returns empty string
+     * for generic basenames like 'original' or 'download'.
+     *
+     * @param string $url
+     * @return string
+     */
+    private function extract_name_from_url($url)
+    {
+        // Try query string 'name' parameter first
+        $query = parse_url($url, PHP_URL_QUERY);
+        if ($query) {
+            parse_str($query, $params);
+            if (!empty($params['name'])) {
+                return $params['name'];
             }
         }
-        
-        // For now, assume anything else is a filename
-        return (string) $value;
+
+        // Fall back to URL path basename
+        $path = parse_url($url, PHP_URL_PATH);
+        $basename = $path ? basename($path) : '';
+
+        // Skip generic basenames that aren't real filenames
+        if (in_array(strtolower($basename), array('original', 'download', 'preview'), true)) {
+            return '';
+        }
+
+        return $basename;
     }
-    
+
     /**
      * Extract asset ID from various URL formats
      *
@@ -461,42 +553,27 @@ class ACF_Field_Canto extends acf_field
         if (empty($url)) {
             return false;
         }
-        
-        // Pattern 1: Direct document URL - /direct/document/ASSET_ID/TOKEN/original
-        if (preg_match('/\/direct\/document\/([^\/\?]+)\/[^\/]+\/original/', $url, $matches)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Extracted asset ID from direct URL: ' . $matches[1]);
-            }
+
+        // Pattern 1: Direct URL - /direct/(document|image|video)/ASSET_ID/TOKEN/original
+        if (preg_match('/\/direct\/(?:document|image|video)\/([^\/\?]+)\/[^\/]+\/original/', $url, $matches)) {
             return $matches[1];
         }
-        
-        // Pattern 2: Direct document URL without /original - /direct/document/ASSET_ID
-        if (preg_match('/\/direct\/document\/([^\/\?]+)/', $url, $matches)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Extracted asset ID from direct URL (no /original): ' . $matches[1]);
-            }
+
+        // Pattern 2: Direct URL without /original - /direct/(document|image|video)/ASSET_ID
+        if (preg_match('/\/direct\/(?:document|image|video)\/([^\/\?]+)/', $url, $matches)) {
             return $matches[1];
         }
-        
-        // Pattern 3: API binary URL - /api_binary/v1/document/ASSET_ID
+
+        // Pattern 3: API binary URL - /api_binary/v1/(advance/)?(image|video|document)/ASSET_ID
         if (preg_match('/\/api_binary\/v1\/(?:advance\/)?(?:image|video|document)\/([a-zA-Z0-9]+)/', $url, $matches)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Extracted asset ID from API binary URL: ' . $matches[1]);
-            }
             return $matches[1];
         }
-        
-        // Pattern 4: Any other document URL with recognizable ID pattern
-        if (preg_match('/\/document\/([a-zA-Z0-9_-]{15,})/', $url, $matches)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Extracted asset ID from generic document URL: ' . $matches[1]);
-            }
+
+        // Pattern 4: Any other asset URL with recognizable ID pattern
+        if (preg_match('/\/(?:document|image|video)\/([a-zA-Z0-9_-]{15,})/', $url, $matches)) {
             return $matches[1];
         }
-        
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('ACF Canto Field: Could not extract asset ID from URL: ' . $url);
-        }
+
         return false;
     }
 
@@ -511,89 +588,14 @@ class ACF_Field_Canto extends acf_field
         if (empty($download_url)) {
             return false;
         }
-        
-        // Try to extract asset ID from download URL - supports multiple URL formats
+
         $asset_id = $this->extract_asset_id_from_url($download_url);
-        
+
         if ($asset_id) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Extracted asset ID from download URL: ' . $asset_id);
-            }
-            
-            // Use the direct asset loading method instead of search
             return $this->get_canto_asset_data($asset_id);
         }
-        
-        // Fallback: Try cache first for the full URL
-        $cache_key = 'canto_download_url_' . md5($download_url);
-        $cached_data = get_transient($cache_key);
-        
-        if ($cached_data !== false) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Using cached data for download URL: ' . $download_url);
-            }
-            return $cached_data;
-        }
-        
-        // Get Canto configuration
-        $domain = get_option('fbc_flight_domain');
-        $app_api = get_option('fbc_app_api') ?: 'canto.com';
-        $token = get_option('fbc_app_token');
-        
-        if (!$domain || !$token) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Missing domain or token for download URL lookup');
-            }
-            return false;
-        }
-        
-        if (!$domain || !$token) {
-            return false;
-        }
-        
-        // Search for assets using Canto search API
-        $search_url = 'https://' . $domain . '.' . $app_api . '/api/v1/search?limit=100';
-        
-        $headers = array(
-            'Authorization' => 'Bearer ' . $token,
-            'User-Agent' => 'WordPress Plugin',
-            'Content-Type' => 'application/json;charset=utf-8'
-        );
-        
-        $response = wp_remote_get($search_url, array(
-            'headers' => $headers,
-            'timeout' => 30
-        ));
-        
-        if (is_wp_error($response)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Download URL search failed: ' . $response->get_error_message());
-            }
-            return false;
-        }
-        
-        $body = wp_remote_retrieve_body($response);
-        $http_code = wp_remote_retrieve_response_code($response);
-        
-        if ($http_code !== 200 || empty($body)) {
-            return false;
-        }
-        
-        $data = json_decode($body, true);
-        if (!$data || !isset($data['results'])) {
-            return false;
-        }
-        
-        // Look for exact download URL match
-        foreach ($data['results'] as $item) {
-            $asset_data = $this->format_asset_data_from_search($item);
-            if ($asset_data && isset($asset_data['download_url']) && $asset_data['download_url'] === $download_url) {
-                // Cache for 1 hour
-                set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
-                return $asset_data;
-            }
-        }
-        
+
+        $this->logger->warning('Could not extract asset ID from URL', array('url' => $download_url));
         return false;
     }
 
@@ -608,221 +610,32 @@ class ACF_Field_Canto extends acf_field
         if (empty($filename)) {
             return false;
         }
-        
-        // Try cache first
-        $cache_key = 'canto_filename_' . md5($filename);
-        $cached_data = get_transient($cache_key);
-        
-        if ($cached_data !== false) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Using cached data for filename: ' . $filename);
-            }
-            return $cached_data;
-        }
-        
-        // Get Canto configuration
-        $domain = get_option('fbc_flight_domain');
-        $app_api = get_option('fbc_app_api') ?: 'canto.com';
-        $token = get_option('fbc_app_token');
-        
-        if (!$domain || !$token) {
+
+        $result = $this->api->search_assets($filename, array('limit' => 50));
+
+        if (is_wp_error($result) || !isset($result['results']) || empty($result['results'])) {
             return false;
         }
-        
-        // Search for the filename using Canto search API
-        $search_url = 'https://' . $domain . '.' . $app_api . '/api/v1/search?keyword=' . urlencode($filename) . '&limit=50';
-        
-        $headers = array(
-            'Authorization' => 'Bearer ' . $token,
-            'User-Agent' => 'WordPress Plugin',
-            'Content-Type' => 'application/json;charset=utf-8'
-        );
-        
-        $response = wp_remote_get($search_url, array(
-            'headers' => $headers,
-            'timeout' => 30
-        ));
-        
-        if (is_wp_error($response)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('ACF Canto Field: Filename search failed: ' . $response->get_error_message());
-            }
-            return false;
-        }
-        
-        $body = wp_remote_retrieve_body($response);
-        $http_code = wp_remote_retrieve_response_code($response);
-        
-        if ($http_code !== 200 || empty($body)) {
-            return false;
-        }
-        
-        $data = json_decode($body, true);
-        if (!$data || !isset($data['results'])) {
-            return false;
-        }
-        
-        // Priority 1: Look for exact filename match
-        foreach ($data['results'] as $item) {
-            $asset_data = $this->format_asset_data_from_search($item);
+
+        // Priority 1: Exact filename match
+        foreach ($result['results'] as $item) {
+            $asset_data = $this->formatter->format_from_search($item);
             if ($asset_data && $asset_data['filename'] === $filename) {
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('ACF Canto Field: Found exact filename match for: ' . $filename);
-                }
-                // Cache for 1 hour
-                set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
                 return $asset_data;
             }
         }
 
-        // Priority 2: Try matching against the name field
-        // This handles cases where assets don't have explicit filename metadata
-        foreach ($data['results'] as $item) {
-            $asset_data = $this->format_asset_data_from_search($item);
+        // Priority 2: Exact name match
+        foreach ($result['results'] as $item) {
+            $asset_data = $this->formatter->format_from_search($item);
             if ($asset_data && $asset_data['name'] === $filename) {
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('ACF Canto Field: Found exact name match for: ' . $filename);
-                }
-                // Cache for 1 hour
-                set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
                 return $asset_data;
             }
         }
 
-        // Priority 3: Fall back to first fuzzy match result if available
-        // This handles cases with filename variations or partial matches
-        if (!empty($data['results'])) {
-            $first_result = reset($data['results']);
-            $asset_data = $this->format_asset_data_from_search($first_result);
-
-            if ($asset_data) {
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('ACF Canto Field: Using fuzzy match fallback for: ' . $filename . ' (matched: ' . $asset_data['filename'] . ')');
-                }
-                // Cache for 1 hour
-                set_transient($cache_key, $asset_data, HOUR_IN_SECONDS);
-                return $asset_data;
-            }
-        }
-
-        return false;
-    }
-    
-    /**
-     * Format asset data from search results
-     *
-     * @param array $data Raw asset data from search API
-     * @return array|false Formatted asset data
-     */
-    private function format_asset_data_from_search($data)
-    {
-        if (!is_array($data) || !isset($data['id'])) {
-            return false;
-        }
-        
-        // Determine asset type
-        $scheme = 'image'; // default
-        if (isset($data['scheme'])) {
-            $scheme = $data['scheme'];
-        } elseif (isset($data['url']['preview'])) {
-            if (strpos($data['url']['preview'], '/video/') !== false) {
-                $scheme = 'video';
-            } elseif (strpos($data['url']['preview'], '/document/') !== false) {
-                $scheme = 'document';
-            }
-        }
-        
-        $formatted_data = array(
-            'id' => $data['id'],
-            'scheme' => $scheme,
-            'name' => isset($data['name']) ? $data['name'] : 'Untitled',
-            'filename' => '',
-            'url' => '',
-            'thumbnail' => '',
-            'download_url' => '',
-            'dimensions' => '',
-            'mime_type' => '',
-            'size' => '',
-            'uploaded' => isset($data['lastUploaded']) ? $data['lastUploaded'] : '',
-            'metadata' => isset($data['default']) ? $data['default'] : array(),
-        );
-        
-        // Extract filename from metadata
-        if (isset($data['default']) && is_array($data['default'])) {
-            $filename_fields = array('Filename', 'File Name', 'Original Filename', 'filename', 'file_name');
-            foreach ($filename_fields as $field) {
-                if (isset($data['default'][$field]) && !empty($data['default'][$field])) {
-                    $formatted_data['filename'] = $data['default'][$field];
-                    break;
-                }
-            }
-        }
-        
-        // If no filename found, construct from name
-        if (empty($formatted_data['filename'])) {
-            if (preg_match('/\.[a-zA-Z0-9]{2,5}$/', $formatted_data['name'])) {
-                $formatted_data['filename'] = $formatted_data['name'];
-            } else {
-                $extension_map = array('image' => 'jpg', 'video' => 'mp4', 'document' => 'pdf');
-                $extension = isset($extension_map[$scheme]) ? $extension_map[$scheme] : 'bin';
-                $safe_name = preg_replace('/[^a-zA-Z0-9_-]/', '_', $formatted_data['name']);
-                $formatted_data['filename'] = $safe_name . '.' . $extension;
-            }
-        }
-        
-        // Get URLs and other data
-        $domain = get_option('fbc_flight_domain');
-        $app_api = get_option('fbc_app_api') ?: 'canto.com';
-        
-        // Initialize direct_url field
-        $formatted_data['direct_url'] = '';
-        
-        if (isset($data['url'])) {
-            if (isset($data['url']['preview'])) {
-                $formatted_data['url'] = $data['url']['preview'];
-            }
-            if (isset($data['url']['download'])) {
-                $formatted_data['download_url'] = $data['url']['download'];
-            }
-            if (isset($data['url']['direct'])) {
-                $formatted_data['direct_url'] = $data['url']['direct'];
-            }
-            if (isset($data['url']['directUrlPreview'])) {
-                $formatted_data['thumbnail'] = $data['url']['directUrlPreview'];
-                // Sometimes direct URL is in directUrlPreview, check if it's a direct document URL
-                if (empty($formatted_data['direct_url']) && strpos($data['url']['directUrlPreview'], '/direct/document/') !== false) {
-                    $formatted_data['direct_url'] = $data['url']['directUrlPreview'];
-                }
-            }
-        }
-        
-        // Priority 1: Construct direct document URL (preferred format)
-        if (empty($formatted_data['direct_url']) && $domain) {
-            $formatted_data['direct_url'] = 'https://' . $domain . '.' . $app_api . '/direct/document/' . $data['id'];
-        }
-        
-        // Priority 2: If no download URL from API, construct one using direct URL first, then binary API
-        if (empty($formatted_data['download_url'])) {
-            if (!empty($formatted_data['direct_url'])) {
-                $formatted_data['download_url'] = $formatted_data['direct_url'];
-            } elseif ($domain) {
-                // Fallback to API binary URLs
-                if ($scheme === 'image') {
-                    $formatted_data['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/advance/image/' . $data['id'] . '/download/directuri?type=jpg&dpi=72';
-                } elseif ($scheme === 'video') {
-                    $formatted_data['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/video/' . $data['id'] . '/download';
-                } elseif ($scheme === 'document') {
-                    $formatted_data['download_url'] = 'https://' . $domain . '.' . $app_api . '/api_binary/v1/document/' . $data['id'] . '/download';
-                }
-            }
-        }
-        
-        // Fallback thumbnail
-        if (empty($formatted_data['thumbnail']) && $domain) {
-            $formatted_data['thumbnail'] = home_url('canto-thumbnail/' . $scheme . '/' . $data['id']);
-        }
-        
-        return $formatted_data;
+        // Priority 3: First result as fuzzy fallback
+        $first = reset($result['results']);
+        return $this->formatter->format_from_search($first) ?: false;
     }
     
     /**
@@ -836,16 +649,10 @@ class ACF_Field_Canto extends acf_field
      */
     public function validate_value($valid, $value, $field, $input)
     {
-        // Basic validation
         if ($field['required'] && empty($value)) {
             $valid = __('This field is required.', 'acf-canto-field');
         }
-        
-        // Debug what value we're getting
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('ACF Canto Field: Validating value: ' . print_r($value, true));
-        }
-        
+
         return $valid;
     }
     
@@ -933,85 +740,6 @@ class ACF_Field_Canto extends acf_field
         
         return $this->formatter->format_from_api($result, $asset_id);
     }
-    
-
-    
-    /**
-     * Search for asset by download URL using API
-     *
-     * @param string $download_url
-     * @return array|false
-     */
-    private function search_asset_by_download_url($download_url)
-    {
-        $result = $this->api->search_assets('', array('limit' => 100));
-        
-        if (is_wp_error($result)) {
-            $this->logger->error('Download URL search failed: ' . $result->get_error_message(), array('url' => $download_url));
-            return false;
-        }
-        
-        if (!isset($result['results']) || empty($result['results'])) {
-            return false;
-        }
-        
-        // Look for exact download URL match
-        foreach ($result['results'] as $item) {
-            $asset_data = $this->formatter->format_from_search($item);
-            if ($asset_data && isset($asset_data['download_url']) && $asset_data['download_url'] === $download_url) {
-                return $asset_data;
-            }
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Find best filename match from search results
-     *
-     * @param array $results Search results
-     * @param string $filename Target filename
-     * @return array|false
-     */
-    private function find_best_filename_match($results, $filename)
-    {
-        // Priority 1: Exact filename match
-        foreach ($results as $item) {
-            $asset_data = $this->formatter->format_from_search($item);
-            if ($asset_data && $asset_data['filename'] === $filename) {
-                $this->logger->debug('Found exact filename match', array('filename' => $filename, 'asset_id' => $asset_data['id']));
-                return $asset_data;
-            }
-        }
-
-        // Priority 2: Name field match (handles assets without explicit filename metadata)
-        foreach ($results as $item) {
-            $asset_data = $this->formatter->format_from_search($item);
-            if ($asset_data && $asset_data['name'] === $filename) {
-                $this->logger->debug('Found name field match', array('filename' => $filename, 'asset_id' => $asset_data['id']));
-                return $asset_data;
-            }
-        }
-
-        // Priority 3: Fall back to first fuzzy match result if available
-        if (!empty($results)) {
-            $first_result = reset($results);
-            $asset_data = $this->formatter->format_from_search($first_result);
-
-            if ($asset_data) {
-                $this->logger->info('Using fuzzy match fallback', array(
-                    'searched_filename' => $filename,
-                    'matched_filename' => $asset_data['filename'],
-                    'asset_id' => $asset_data['id']
-                ));
-                return $asset_data;
-            }
-        }
-
-        $this->logger->info('No filename match found in search results', array('filename' => $filename, 'results_count' => count($results)));
-        return false;
-    }
 }
 
-// End class_exists check
 endif;
